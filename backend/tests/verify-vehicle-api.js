@@ -2,6 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const mongoose = require('mongoose');
 const app = require('../src/server');
+const { User } = require('../src/models');
 
 const makeRequest = (options, postData = null) => {
   return new Promise((resolve, reject) => {
@@ -62,10 +63,36 @@ const runAPITests = async () => {
     port: PORT
   };
 
+  let testUserId = null;
+  let authHeaders = {};
+
   try {
     console.log('Waiting for Express server and MongoDB Atlas connection...');
     await waitForServer(baseUrl);
     console.log('✔ Server is online and responding.\n');
+
+    // Setup: Register test user for authenticated API calls
+    const authEmail = `vehicle.test.${Date.now()}@example.com`;
+    const regRes = await makeRequest(
+      {
+        ...baseUrl,
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      },
+      {
+        name: 'Vehicle Test User',
+        email: authEmail,
+        password: 'Password123'
+      }
+    );
+    if (regRes.statusCode === 201 && regRes.body.data?.token) {
+      testUserId = regRes.body.data.user.id;
+      authHeaders = {
+        Authorization: `Bearer ${regRes.body.data.token}`
+      };
+      console.log('✔ Test user authenticated for vehicle API tests.\n');
+    }
 
     // 1. Test GET /api/health
     console.log('1. Testing GET /api/health...');
@@ -106,7 +133,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: '/api/vehicles',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       newVehiclePayload
     );
@@ -122,7 +149,8 @@ const runAPITests = async () => {
     const listRes = await makeRequest({
       ...baseUrl,
       path: '/api/vehicles',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${listRes.statusCode}, Count: ${listRes.body.count}`);
     if (listRes.statusCode !== 200 || !Array.isArray(listRes.body.data)) {
@@ -137,7 +165,8 @@ const runAPITests = async () => {
     const getSingleRes = await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${createdId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${getSingleRes.statusCode}`, getSingleRes.body.data.vehicleNumber);
     if (getSingleRes.statusCode !== 200 || getSingleRes.body.data.vehicleNumber !== testVehNum) {
@@ -157,7 +186,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${createdId}`,
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       updatePayload
     );
@@ -174,7 +203,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: '/api/vehicles',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       newVehiclePayload
     );
@@ -191,7 +220,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: '/api/vehicles',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { vehicleNumber: `MISSING-FIELDS-${Date.now()}` }
     );
@@ -208,7 +237,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: '/api/vehicles',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       {
         ...newVehiclePayload,
@@ -229,7 +258,7 @@ const runAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${createdId}`,
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { status: 'FLYING_AWAY' }
     );
@@ -244,7 +273,8 @@ const runAPITests = async () => {
     const invalidIdRes = await makeRequest({
       ...baseUrl,
       path: '/api/vehicles/not-a-valid-id-123',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${invalidIdRes.statusCode}`, invalidIdRes.body);
     if (invalidIdRes.statusCode !== 400) {
@@ -258,7 +288,8 @@ const runAPITests = async () => {
     const nonExistentRes = await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${nonExistentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${nonExistentRes.statusCode}`, nonExistentRes.body);
     if (nonExistentRes.statusCode !== 404) {
@@ -271,7 +302,8 @@ const runAPITests = async () => {
     const deleteRes = await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${createdId}`,
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${deleteRes.statusCode}`, deleteRes.body);
     if (deleteRes.statusCode !== 200 || !deleteRes.body.success) {
@@ -284,7 +316,8 @@ const runAPITests = async () => {
     const verifyDeletedRes = await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${createdId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${verifyDeletedRes.statusCode}`, verifyDeletedRes.body);
     if (verifyDeletedRes.statusCode !== 404) {
@@ -292,10 +325,21 @@ const runAPITests = async () => {
     }
     console.log('   ✔ Verification of deleted vehicle PASSED (HTTP 404)\n');
 
+    // Cleanup: Remove test user
+    if (testUserId) {
+      await User.findByIdAndDelete(testUserId);
+      console.log('   Cleaned up test user.\n');
+    }
+
     console.log('=== ALL 13 VEHICLE REST API TESTS PASSED SUCCESSFULLY! ===\n');
     process.exit(0);
   } catch (error) {
     console.error('✖ Vehicle REST API test failed:', error);
+    if (testUserId) {
+      try {
+        await User.findByIdAndDelete(testUserId);
+      } catch (e) {}
+    }
     process.exit(1);
   }
 };

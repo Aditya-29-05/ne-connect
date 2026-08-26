@@ -2,6 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const mongoose = require('mongoose');
 const app = require('../src/server');
+const { User } = require('../src/models');
 
 const makeRequest = (options, postData = null) => {
   return new Promise((resolve, reject) => {
@@ -62,10 +63,36 @@ const runRemainingAPITests = async () => {
     port: PORT
   };
 
+  let testUserId = null;
+  let authHeaders = {};
+
   try {
     console.log('Waiting for Express server and MongoDB Atlas connection...');
     await waitForServer(baseUrl);
     console.log('✔ Server is online and responding.\n');
+
+    // Setup: Register test user for authenticated API calls
+    const authEmail = `remaining.test.${Date.now()}@example.com`;
+    const regRes = await makeRequest(
+      {
+        ...baseUrl,
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      },
+      {
+        name: 'Remaining APIs Test User',
+        email: authEmail,
+        password: 'Password123'
+      }
+    );
+    if (regRes.statusCode === 201 && regRes.body.data?.token) {
+      testUserId = regRes.body.data.user.id;
+      authHeaders = {
+        Authorization: `Bearer ${regRes.body.data.token}`
+      };
+      console.log('✔ Test user authenticated for remaining API tests.\n');
+    }
 
     // ==========================================
     // 1. HEALTH CHECK
@@ -118,7 +145,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/shipments',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       shipmentPayload
     );
@@ -134,7 +161,8 @@ const runRemainingAPITests = async () => {
     const listShipmentsRes = await makeRequest({
       ...baseUrl,
       path: '/api/shipments',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${listShipmentsRes.statusCode}, Count: ${listShipmentsRes.body.count}`);
     if (listShipmentsRes.statusCode !== 200 || !Array.isArray(listShipmentsRes.body.data)) {
@@ -149,7 +177,8 @@ const runRemainingAPITests = async () => {
     const getShipmentRes = await makeRequest({
       ...baseUrl,
       path: `/api/shipments/${createdShipmentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${getShipmentRes.statusCode}`, getShipmentRes.body.data.trackingNumber);
     if (getShipmentRes.statusCode !== 200 || getShipmentRes.body.data.trackingNumber !== testTrackingNum) {
@@ -164,7 +193,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/shipments/${createdShipmentId}`,
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { status: 'IN_TRANSIT', weightKg: 50.0 }
     );
@@ -181,7 +210,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/shipments',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       shipmentPayload
     );
@@ -198,7 +227,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/shipments',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { ...shipmentPayload, trackingNumber: `INV-COMMODITY-${Date.now()}`, commodityType: 'INVALID_TYPE' }
     );
@@ -213,7 +242,8 @@ const runRemainingAPITests = async () => {
     const invalidShipmentIdRes = await makeRequest({
       ...baseUrl,
       path: '/api/shipments/invalid-id-xyz',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${invalidShipmentIdRes.statusCode}`, invalidShipmentIdRes.body);
     if (invalidShipmentIdRes.statusCode !== 400) {
@@ -227,7 +257,8 @@ const runRemainingAPITests = async () => {
     const nonExistentShipmentRes = await makeRequest({
       ...baseUrl,
       path: `/api/shipments/${nonExistentShipmentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${nonExistentShipmentRes.statusCode}`, nonExistentShipmentRes.body);
     if (nonExistentShipmentRes.statusCode !== 404) {
@@ -240,7 +271,8 @@ const runRemainingAPITests = async () => {
     const deleteShipmentRes = await makeRequest({
       ...baseUrl,
       path: `/api/shipments/${createdShipmentId}`,
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${deleteShipmentRes.statusCode}`, deleteShipmentRes.body);
     if (deleteShipmentRes.statusCode !== 200 || !deleteShipmentRes.body.success) {
@@ -253,7 +285,8 @@ const runRemainingAPITests = async () => {
     const verifyDeletedShipmentRes = await makeRequest({
       ...baseUrl,
       path: `/api/shipments/${createdShipmentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     if (verifyDeletedShipmentRes.statusCode !== 404) {
       throw new Error(`Deleted shipment verification failed: expected 404, got ${verifyDeletedShipmentRes.statusCode}`);
@@ -304,7 +337,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/routes',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       routePayload
     );
@@ -320,7 +353,8 @@ const runRemainingAPITests = async () => {
     const listRoutesRes = await makeRequest({
       ...baseUrl,
       path: '/api/routes',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${listRoutesRes.statusCode}, Count: ${listRoutesRes.body.count}`);
     if (listRoutesRes.statusCode !== 200 || !Array.isArray(listRoutesRes.body.data)) {
@@ -335,7 +369,8 @@ const runRemainingAPITests = async () => {
     const getRouteRes = await makeRequest({
       ...baseUrl,
       path: `/api/routes/${createdRouteId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${getRouteRes.statusCode}`, getRouteRes.body.data.routeCode);
     if (getRouteRes.statusCode !== 200 || getRouteRes.body.data.routeCode !== testRouteCode) {
@@ -350,7 +385,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/routes/${createdRouteId}`,
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { status: 'RESTRICTED', riskLevel: 'MEDIUM' }
     );
@@ -367,7 +402,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/routes',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       routePayload
     );
@@ -384,7 +419,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/routes',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { ...routePayload, routeCode: `INV-RT-${Date.now()}`, allowedVehicleTypes: ['SPACE_SHUTTLE'] }
     );
@@ -399,7 +434,8 @@ const runRemainingAPITests = async () => {
     const invalidRouteIdRes = await makeRequest({
       ...baseUrl,
       path: '/api/routes/bad-id-123',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${invalidRouteIdRes.statusCode}`, invalidRouteIdRes.body);
     if (invalidRouteIdRes.statusCode !== 400) {
@@ -413,7 +449,8 @@ const runRemainingAPITests = async () => {
     const nonExistentRouteRes = await makeRequest({
       ...baseUrl,
       path: `/api/routes/${nonExistentRouteId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${nonExistentRouteRes.statusCode}`, nonExistentRouteRes.body);
     if (nonExistentRouteRes.statusCode !== 404) {
@@ -426,7 +463,8 @@ const runRemainingAPITests = async () => {
     const deleteRouteRes = await makeRequest({
       ...baseUrl,
       path: `/api/routes/${createdRouteId}`,
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${deleteRouteRes.statusCode}`, deleteRouteRes.body);
     if (deleteRouteRes.statusCode !== 200 || !deleteRouteRes.body.success) {
@@ -439,7 +477,8 @@ const runRemainingAPITests = async () => {
     const verifyDeletedRouteRes = await makeRequest({
       ...baseUrl,
       path: `/api/routes/${createdRouteId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     if (verifyDeletedRouteRes.statusCode !== 404) {
       throw new Error(`Deleted route verification failed: expected 404, got ${verifyDeletedRouteRes.statusCode}`);
@@ -471,7 +510,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/incidents',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       incidentPayload
     );
@@ -487,7 +526,8 @@ const runRemainingAPITests = async () => {
     const listIncidentsRes = await makeRequest({
       ...baseUrl,
       path: '/api/incidents',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${listIncidentsRes.statusCode}, Count: ${listIncidentsRes.body.count}`);
     if (listIncidentsRes.statusCode !== 200 || !Array.isArray(listIncidentsRes.body.data)) {
@@ -502,7 +542,8 @@ const runRemainingAPITests = async () => {
     const getIncidentRes = await makeRequest({
       ...baseUrl,
       path: `/api/incidents/${createdIncidentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${getIncidentRes.statusCode}`, getIncidentRes.body.data.title);
     if (getIncidentRes.statusCode !== 200 || getIncidentRes.body.data.title !== incidentPayload.title) {
@@ -517,7 +558,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/incidents/${createdIncidentId}`,
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { status: 'RESOLVING', severity: 'MODERATE' }
     );
@@ -534,7 +575,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/incidents',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       { ...incidentPayload, type: 'METEOR_SHOWER' }
     );
@@ -549,7 +590,8 @@ const runRemainingAPITests = async () => {
     const invalidIncidentIdRes = await makeRequest({
       ...baseUrl,
       path: '/api/incidents/bad-incident-id',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${invalidIncidentIdRes.statusCode}`, invalidIncidentIdRes.body);
     if (invalidIncidentIdRes.statusCode !== 400) {
@@ -563,7 +605,8 @@ const runRemainingAPITests = async () => {
     const nonExistentIncidentRes = await makeRequest({
       ...baseUrl,
       path: `/api/incidents/${nonExistentIncidentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${nonExistentIncidentRes.statusCode}`, nonExistentIncidentRes.body);
     if (nonExistentIncidentRes.statusCode !== 404) {
@@ -576,7 +619,8 @@ const runRemainingAPITests = async () => {
     const deleteIncidentRes = await makeRequest({
       ...baseUrl,
       path: `/api/incidents/${createdIncidentId}`,
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${deleteIncidentRes.statusCode}`, deleteIncidentRes.body);
     if (deleteIncidentRes.statusCode !== 200 || !deleteIncidentRes.body.success) {
@@ -589,7 +633,8 @@ const runRemainingAPITests = async () => {
     const verifyDeletedIncidentRes = await makeRequest({
       ...baseUrl,
       path: `/api/incidents/${createdIncidentId}`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     if (verifyDeletedIncidentRes.statusCode !== 404) {
       throw new Error(`Deleted incident verification failed: expected 404, got ${verifyDeletedIncidentRes.statusCode}`);
@@ -608,7 +653,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: '/api/vehicles',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       {
         vehicleNumber: trackingVehNum,
@@ -647,7 +692,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${trackingVehicleId}/location`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       loc1Payload
     );
@@ -673,7 +718,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${trackingVehicleId}/location`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       loc2Payload
     );
@@ -688,7 +733,8 @@ const runRemainingAPITests = async () => {
     const historyRes = await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${trackingVehicleId}/location-history`,
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${historyRes.statusCode}, Records count: ${historyRes.body.count}`);
     if (historyRes.statusCode !== 200 || !Array.isArray(historyRes.body.data) || historyRes.body.count !== 2) {
@@ -701,7 +747,8 @@ const runRemainingAPITests = async () => {
     const invalidVehIdRes = await makeRequest({
       ...baseUrl,
       path: '/api/vehicles/invalid-veh-id/location-history',
-      method: 'GET'
+      method: 'GET',
+      headers: { ...authHeaders }
     });
     console.log(`   Status: ${invalidVehIdRes.statusCode}`, invalidVehIdRes.body);
     if (invalidVehIdRes.statusCode !== 400) {
@@ -717,7 +764,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${nonExistentVehId}/location`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       loc1Payload
     );
@@ -734,7 +781,7 @@ const runRemainingAPITests = async () => {
         ...baseUrl,
         path: `/api/vehicles/${trackingVehicleId}/location`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...authHeaders }
       },
       {
         location: {
@@ -753,9 +800,16 @@ const runRemainingAPITests = async () => {
     await makeRequest({
       ...baseUrl,
       path: `/api/vehicles/${trackingVehicleId}`,
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { ...authHeaders }
     });
     console.log('   Cleaned up temporary tracking vehicle.\n');
+
+    // Cleanup: Remove test user
+    if (testUserId) {
+      await User.findByIdAndDelete(testUserId);
+      console.log('   Cleaned up test user.\n');
+    }
 
     console.log('===========================================================');
     console.log('=== ALL NEC-11 REMAINING REST API TESTS PASSED (100%)! ===');
@@ -763,6 +817,11 @@ const runRemainingAPITests = async () => {
     process.exit(0);
   } catch (error) {
     console.error('✖ NEC-11 Remaining REST API test failed:', error);
+    if (testUserId) {
+      try {
+        await User.findByIdAndDelete(testUserId);
+      } catch (e) {}
+    }
     process.exit(1);
   }
 };

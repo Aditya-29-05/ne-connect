@@ -3,11 +3,13 @@ const Route = require('./Route');
 const Incident = require('./Incident');
 const Shipment = require('./Shipment');
 const VehicleLocation = require('./VehicleLocation');
+const User = require('./User');
 
 module.exports = {
   Vehicle,
   Route,
   Incident,
   Shipment,
-  VehicleLocation
+  VehicleLocation,
+  User
 };
